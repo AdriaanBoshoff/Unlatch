@@ -1,0 +1,9 @@
+# Local builds with the LLVM-MinGW toolchain (x86_64-pc-windows-gnullvm):
+# link the C runtime and libunwind statically so Unlatch.exe is a single
+# self-contained file with no DLLs to ship next to it.
+[target.x86_64-pc-windows-gnullvm]
+rustflags = ["-C", "target-feature=+crt-static", "-C", "link-arg=-static"]
+
+# MSVC builds (CI / Visual Studio users): static CRT too.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
