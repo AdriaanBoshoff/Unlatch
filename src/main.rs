@@ -4,6 +4,7 @@
 //!   unlatch [PATH...]     open the window for these paths (Explorer passes one)
 //!   unlatch --install     add "Unlock with Unlatch" to the right-click menu
 //!   unlatch --uninstall   remove it again
+//!   (add --quiet to either for no message box; see exit codes in main)
 //!   unlatch --list PATH   print holders to the console (for scripts/debugging)
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -36,21 +37,49 @@ fn message_box(text: &str, error: bool) {
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // --quiet (used by Setup.exe) skips the message boxes and reports through
+    // the exit code instead: 0 = done, 1 = failed, 2 = installed but only the
+    // classic "Show more options" entry could be added.
+    let quiet = args.iter().any(|a| a == "--quiet");
 
     match args.first().map(String::as_str) {
         Some("--install") => {
-            match shell::install() {
-                Ok(done) => message_box(&done.summary(), false),
-                Err(e) => message_box(&format!("Install failed: {e}"), true),
-            }
-            return;
+            let code = match shell::install() {
+                Ok(done) => {
+                    if !quiet {
+                        message_box(&done.summary(), false);
+                    }
+                    if matches!(done.modern, shell::ModernMenu::Added) {
+                        0
+                    } else {
+                        2
+                    }
+                }
+                Err(e) => {
+                    if !quiet {
+                        message_box(&format!("Install failed: {e}"), true);
+                    }
+                    1
+                }
+            };
+            std::process::exit(code);
         }
         Some("--uninstall") => {
-            match shell::uninstall() {
-                Ok(()) => message_box("Unlatch has been removed.", false),
-                Err(e) => message_box(&format!("Uninstall finished with a problem: {e}"), true),
-            }
-            return;
+            let code = match shell::uninstall() {
+                Ok(()) => {
+                    if !quiet {
+                        message_box("Unlatch has been removed.", false);
+                    }
+                    0
+                }
+                Err(e) => {
+                    if !quiet {
+                        message_box(&format!("Uninstall finished with a problem: {e}"), true);
+                    }
+                    1
+                }
+            };
+            std::process::exit(code);
         }
         Some("--list") => {
             list_to_console(&args[1..]);

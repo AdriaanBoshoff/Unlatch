@@ -373,12 +373,20 @@ pub fn uninstall() -> Result<(), String> {
     }
     let running_from_dir = std::env::current_exe().is_ok_and(|c| c.starts_with(&dir));
     if running_from_dir {
+        use std::os::windows::process::CommandExt;
+        // cmd has its own quoting rules: pass the line verbatim (Rust's
+        // argument escaping would turn the inner quotes into \"), and start
+        // it outside the folder, which cannot be removed while it is a
+        // process's current directory.
         let script = format!(
-            "ping -n 3 127.0.0.1 >nul & rmdir /s /q \"{}\"",
+            "\"ping -n 3 127.0.0.1 >nul & rmdir /s /q \"{}\"\"",
             dir.display()
         );
         std::process::Command::new("cmd")
-            .args(["/d", "/c", &script])
+            .args(["/d", "/c"])
+            .raw_arg(script)
+            .current_dir(std::env::temp_dir())
+            .creation_flags(CREATE_NO_WINDOW)
             .spawn()
             .map_err(|e| format!("scheduling cleanup: {e}"))?;
     } else {
