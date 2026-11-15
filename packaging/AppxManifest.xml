@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Sparse ("external location") package. It contains only this manifest and
+  the logos; Unlatch.exe and unlatch_shell.dll stay in the normal install
+  folder, which is passed as -ExternalLocation when the package is added.
+
+  Its only job is to give Explorer a packaged IExplorerCommand handler, the
+  one kind of handler the Windows 11 compact context menu will show.
+  (The schema has no "Drive" item type, so drives keep only the classic
+  "Show more options" entry.)
+
+  Unlatch.exe embeds this file. On install it writes it to
+  %LOCALAPPDATA%\Programs\Unlatch\package\ with @VERSION@ filled in and
+  registers it in place (Add-AppxPackage -Register), which Windows allows
+  without a signature when Developer Mode is on. Unsigned .msix files are
+  not an option: Windows rejects them when they declare an Executable.
+-->
+<Package
+  xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
+  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+  xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
+  xmlns:desktop4="http://schemas.microsoft.com/appx/manifest/desktop/windows10/4"
+  xmlns:desktop5="http://schemas.microsoft.com/appx/manifest/desktop/windows10/5"
+  xmlns:com="http://schemas.microsoft.com/appx/manifest/com/windows10"
+  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
+  IgnorableNamespaces="uap uap10 desktop4 desktop5 com rescap">
+
+  <Identity
+    Name="Unlatch.ContextMenu"
+    Publisher="CN=Unlatch"
+    Version="@VERSION@"
+    ProcessorArchitecture="x64" />
+
+  <Properties>
+    <DisplayName>Unlatch</DisplayName>
+    <PublisherDisplayName>Unlatch</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+    <uap10:AllowExternalContent>true</uap10:AllowExternalContent>
+  </Properties>
+
+  <Resources>
+    <Resource Language="en-us" />
+  </Resources>
+
+  <Dependencies>
+    <TargetDeviceFamily Name="Windows.Desktop" MinVersion="10.0.22000.0" MaxVersionTested="10.0.26100.0" />
+  </Dependencies>
+
+  <Capabilities>
+    <rescap:Capability Name="runFullTrust" />
+  </Capabilities>
+
+  <Applications>
+    <Application Id="Unlatch" Executable="Unlatch.exe"
+                 uap10:TrustLevel="mediumIL" uap10:RuntimeBehavior="win32App">
+      <uap:VisualElements
+        AppListEntry="none"
+        DisplayName="Unlatch"
+        Description="Find and release whatever is locking a file or folder"
+        BackgroundColor="transparent"
+        Square150x150Logo="Assets\Square150x150Logo.png"
+        Square44x44Logo="Assets\Square44x44Logo.png" />
+      <Extensions>
+        <desktop4:Extension Category="windows.fileExplorerContextMenus">
+          <desktop4:FileExplorerContextMenus>
+            <desktop5:ItemType Type="*">
+              <desktop5:Verb Id="Unlatch" Clsid="d30556c9-3fa0-4866-ae9a-5c91e9d43d9d" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type="Directory">
+              <desktop5:Verb Id="Unlatch" Clsid="d30556c9-3fa0-4866-ae9a-5c91e9d43d9d" />
+            </desktop5:ItemType>
+            <desktop5:ItemType Type="Directory\Background">
+              <desktop5:Verb Id="Unlatch" Clsid="d30556c9-3fa0-4866-ae9a-5c91e9d43d9d" />
+            </desktop5:ItemType>
+          </desktop4:FileExplorerContextMenus>
+        </desktop4:Extension>
+        <com:Extension Category="windows.comServer">
+          <com:ComServer>
+            <com:SurrogateServer DisplayName="Unlatch context menu">
+              <com:Class Id="d30556c9-3fa0-4866-ae9a-5c91e9d43d9d" Path="unlatch_shell.dll" ThreadingModel="STA" />
+            </com:SurrogateServer>
+          </com:ComServer>
+        </com:Extension>
+      </Extensions>
+    </Application>
+  </Applications>
+</Package>

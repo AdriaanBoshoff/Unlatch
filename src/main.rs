@@ -40,13 +40,7 @@ fn main() {
     match args.first().map(String::as_str) {
         Some("--install") => {
             match shell::install() {
-                Ok(exe) => message_box(
-                    &format!(
-                        "Unlatch is installed to\n{}\n\nRight-click any file or folder and choose\nShow more options → Unlock with Unlatch.",
-                        exe.display()
-                    ),
-                    false,
-                ),
+                Ok(done) => message_box(&done.summary(), false),
                 Err(e) => message_box(&format!("Install failed: {e}"), true),
             }
             return;

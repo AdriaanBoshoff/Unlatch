@@ -7,6 +7,9 @@ license = "MIT"
 repository = "https://github.com/AdriaanBoshoff/Unlatch"
 build = "build.rs"
 
+[workspace]
+members = [".", "shellext"]
+
 [dependencies]
 eframe = { version = "0.37.0", default-features = false, features = ["glow", "default_fonts"] }
 rfd = "0.18.0"

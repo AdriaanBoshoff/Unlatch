@@ -317,23 +317,37 @@ impl eframe::App for UnlatchApp {
             },
         );
 
-        egui::Panel::bottom("footer").frame(Frame::side_top_panel(ui.style()).inner_margin(Margin::symmetric(16, 10))).show(
-            ui,
-            |ui| {
+        egui::Panel::bottom("footer")
+            .frame(Frame::side_top_panel(ui.style()).inner_margin(Margin::symmetric(16, 10)))
+            .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    let label = if self.installed { "Remove from right-click menu" } else { "Add to right-click menu" };
+                    let label = if self.installed {
+                        "Remove from right-click menu"
+                    } else {
+                        "Add to right-click menu"
+                    };
                     if ui.add_enabled(!busy, egui::Button::new(label)).clicked() {
-                        let res = if self.installed { shell::uninstall().map(|_| "Removed from the right-click menu.".to_string()) } else {
-                            shell::install().map(|_| "Added to the right-click menu. Right-click any file or folder, then Show more options > Unlock with Unlatch.".to_string())
+                        let res = if self.installed {
+                            shell::uninstall()
+                                .map(|_| "Removed from the right-click menu.".to_string())
+                        } else {
+                            shell::install().map(|done| done.summary())
                         };
                         self.messages = vec![match res {
-                            Ok(t) => Message { text: t, error: false },
-                            Err(e) => Message { text: e, error: true },
+                            Ok(t) => Message {
+                                text: t,
+                                error: false,
+                            },
+                            Err(e) => Message {
+                                text: e,
+                                error: true,
+                            },
                         }];
                         self.installed = shell::is_installed();
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        let has_targets = self.result.as_ref().is_some_and(|r| !r.targets.is_empty());
+                        let has_targets =
+                            self.result.as_ref().is_some_and(|r| !r.targets.is_empty());
                         if has_targets && !self.deleted {
                             if danger_button(ui, "Move to Recycle Bin", !busy).clicked() {
                                 self.confirm = Some(Confirm::Delete);
@@ -341,18 +355,28 @@ impl eframe::App for UnlatchApp {
                             let killable: Vec<u32> = self
                                 .result
                                 .as_ref()
-                                .map(|r| r.holders.iter().filter(|h| !h.is_protected()).map(|h| h.pid).collect())
+                                .map(|r| {
+                                    r.holders
+                                        .iter()
+                                        .filter(|h| !h.is_protected())
+                                        .map(|h| h.pid)
+                                        .collect()
+                                })
                                 .unwrap_or_default();
                             if killable.len() > 1
-                                && ui.add_enabled(!busy, egui::Button::new(format!("End all ({})", killable.len()))).clicked()
+                                && ui
+                                    .add_enabled(
+                                        !busy,
+                                        egui::Button::new(format!("End all ({})", killable.len())),
+                                    )
+                                    .clicked()
                             {
                                 self.confirm = Some(Confirm::EndProcesses(killable));
                             }
                         }
                     });
                 });
-            },
-        );
+            });
 
         egui::CentralPanel::default_margins().show(ui, |ui| {
             if !self.elevated && self.result.as_ref().is_some_and(|r| !r.targets.is_empty()) {

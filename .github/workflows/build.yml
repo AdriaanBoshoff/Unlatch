@@ -13,10 +13,12 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - run: cargo clippy --release -- -D warnings
-      - run: cargo test --release
-      - run: cargo build --release
+      - run: cargo clippy --release --workspace -- -D warnings
+      - run: cargo test --release --workspace
+      - run: cargo build --release --workspace
       - uses: actions/upload-artifact@v4
         with:
           name: Unlatch
-          path: target/release/unlatch.exe
+          path: |
+            target/release/unlatch.exe
+            target/release/unlatch_shell.dll

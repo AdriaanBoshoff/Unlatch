@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 
 use windows_sys::Win32::Foundation::ERROR_SUCCESS;
 use windows_sys::Win32::System::Registry::{
-    HKEY, HKEY_CURRENT_USER, KEY_READ, REG_DWORD, REG_SZ, RegCloseKey, RegDeleteTreeW,
-    RegOpenKeyExW, RegSetKeyValueW,
+    HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, KEY_READ, REG_DWORD, REG_SZ, RRF_RT_REG_DWORD,
+    RegCloseKey, RegDeleteTreeW, RegGetValueW, RegOpenKeyExW, RegSetKeyValueW,
 };
 use windows_sys::Win32::UI::Shell::{
     FO_DELETE, FOF_ALLOWUNDO, FOF_NOCONFIRMATION, SHCNE_ASSOCCHANGED, SHCNF_IDLIST, SHChangeNotify,
@@ -31,6 +31,64 @@ const MENU_KEYS: &[(&str, &str)] = &[
     (r"Drive\shell\Unlatch", "%1"),                // a drive
 ];
 const UNINSTALL_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\Unlatch";
+
+// Windows 11 top-level menu: a sparse package (packaging/AppxManifest.xml)
+// that registers unlatch_shell.dll as an IExplorerCommand handler. The DLL
+// is optional; without it next to the exe, only the classic entries are added.
+const PACKAGE_NAME: &str = "Unlatch.ContextMenu";
+const PACKAGE_MANIFEST: &str = include_str!("../packaging/AppxManifest.xml");
+const PACKAGE_LOGOS: &[(&str, &[u8])] = &[
+    (
+        "Square44x44Logo.png",
+        include_bytes!("../packaging/Assets/Square44x44Logo.png"),
+    ),
+    (
+        "Square150x150Logo.png",
+        include_bytes!("../packaging/Assets/Square150x150Logo.png"),
+    ),
+    (
+        "StoreLogo.png",
+        include_bytes!("../packaging/Assets/StoreLogo.png"),
+    ),
+];
+const SHELL_DLL: &str = "unlatch_shell.dll";
+const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+/// What happened to the Windows 11 top-level menu entry during install.
+pub enum ModernMenu {
+    Added,
+    /// unlatch_shell.dll was not next to the exe.
+    NotBundled,
+    Failed(String),
+}
+
+pub struct Installed {
+    pub exe: PathBuf,
+    pub modern: ModernMenu,
+}
+
+impl Installed {
+    /// Short explanation for the user of where to find the menu entry.
+    pub fn summary(&self) -> String {
+        let where_ = match &self.modern {
+            ModernMenu::Added => {
+                "Right-click any file or folder and choose Unlock with Unlatch.".to_string()
+            }
+            ModernMenu::NotBundled => {
+                "Right-click any file or folder and choose Show more options > Unlock with Unlatch."
+                    .to_string()
+            }
+            ModernMenu::Failed(e) => format!(
+                "Right-click any file or folder and choose Show more options > Unlock with Unlatch.\n\n\
+                 The Windows 11 top-level menu entry could not be added:\n{e}"
+            ),
+        };
+        format!(
+            "Unlatch is installed to\n{}\n\n{where_}",
+            self.exe.display()
+        )
+    }
+}
 
 pub fn install_dir() -> PathBuf {
     let base = std::env::var_os("LOCALAPPDATA")
@@ -114,7 +172,7 @@ fn notify_shell() {
 
 /// Copy ourselves to %LOCALAPPDATA%\Programs\Unlatch and register the
 /// right-click entries plus an "Installed apps" uninstall entry.
-pub fn install() -> Result<PathBuf, String> {
+pub fn install() -> Result<Installed, String> {
     let dir = install_dir();
     std::fs::create_dir_all(&dir).map_err(|e| format!("creating {}: {e}", dir.display()))?;
     let exe = dir.join("Unlatch.exe");
@@ -159,8 +217,139 @@ pub fn install() -> Result<PathBuf, String> {
     set_dword(UNINSTALL_KEY, "NoModify", 1)?;
     set_dword(UNINSTALL_KEY, "NoRepair", 1)?;
 
+    let modern = install_modern_menu(&current, &dir);
     notify_shell();
-    Ok(exe)
+    Ok(Installed { exe, modern })
+}
+
+/// Copy the shell-extension DLL next to the installed exe, write out the
+/// embedded package manifest and logos, and register that manifest in place
+/// with the install folder as its external location.
+fn install_modern_menu(current_exe: &Path, dir: &Path) -> ModernMenu {
+    let Some(src_dir) = current_exe.parent() else {
+        return ModernMenu::NotBundled;
+    };
+    let dll_src = src_dir.join(SHELL_DLL);
+    if !dll_src.exists() {
+        return ModernMenu::NotBundled;
+    }
+    if !same_file(src_dir, dir)
+        && let Err(e) = copy_replacing(&dll_src, &dir.join(SHELL_DLL))
+    {
+        return ModernMenu::Failed(e);
+    }
+    if !developer_mode() {
+        return ModernMenu::Failed(
+            "Developer Mode is off. Turn it on in Settings > System > For developers, \
+             then choose Add to right-click menu again."
+                .into(),
+        );
+    }
+    let manifest = match write_package_files(dir) {
+        Ok(m) => m,
+        Err(e) => return ModernMenu::Failed(e),
+    };
+    // Remove first: registering over an existing registration is refused.
+    let script = format!(
+        "$ErrorActionPreference='Stop'; \
+         Get-AppxPackage -Name '{PACKAGE_NAME}' | Remove-AppxPackage; \
+         Add-AppxPackage -Register {} -ExternalLocation {}",
+        ps_quote(&manifest),
+        ps_quote(dir)
+    );
+    match powershell(&script) {
+        Ok(()) => ModernMenu::Added,
+        Err(e) => ModernMenu::Failed(e),
+    }
+}
+
+/// Write `package\AppxManifest.xml` (version filled in) and its logos.
+fn write_package_files(dir: &Path) -> Result<PathBuf, String> {
+    let pkg = dir.join("package");
+    let assets = pkg.join("Assets");
+    std::fs::create_dir_all(&assets).map_err(|e| format!("creating {}: {e}", assets.display()))?;
+    // Package versions have four parts: 0.1.0 -> 0.1.0.0
+    let version = format!("{}.0", env!("CARGO_PKG_VERSION"));
+    let manifest = pkg.join("AppxManifest.xml");
+    std::fs::write(&manifest, PACKAGE_MANIFEST.replace("@VERSION@", &version))
+        .map_err(|e| format!("writing {}: {e}", manifest.display()))?;
+    for (name, bytes) in PACKAGE_LOGOS {
+        let path = assets.join(name);
+        std::fs::write(&path, bytes).map_err(|e| format!("writing {}: {e}", path.display()))?;
+    }
+    Ok(manifest)
+}
+
+/// Registering an unsigned package from a folder needs Developer Mode.
+fn developer_mode() -> bool {
+    let key = wide(r"SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock");
+    let name = wide("AllowDevelopmentWithoutDevLicense");
+    let mut value = 0u32;
+    let mut size = 4u32;
+    let rc = unsafe {
+        RegGetValueW(
+            HKEY_LOCAL_MACHINE,
+            key.as_ptr(),
+            name.as_ptr(),
+            RRF_RT_REG_DWORD,
+            std::ptr::null_mut(),
+            (&mut value as *mut u32).cast(),
+            &mut size,
+        )
+    };
+    rc == ERROR_SUCCESS && value != 0
+}
+
+/// Explorer keeps the shell-extension DLL loaded, so it usually cannot be
+/// overwritten in place. A loaded DLL can still be renamed, though: move it
+/// aside and copy the new one in. Leftovers are cleaned up on later installs.
+fn copy_replacing(src: &Path, dst: &Path) -> Result<(), String> {
+    if let Some(dir) = dst.parent()
+        && let Ok(entries) = std::fs::read_dir(dir)
+    {
+        for e in entries.flatten() {
+            if e.file_name().to_string_lossy().ends_with(".old") {
+                let _ = std::fs::remove_file(e.path());
+            }
+        }
+    }
+    if std::fs::copy(src, dst).is_ok() {
+        return Ok(());
+    }
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis());
+    let aside = dst.with_extension(format!("dll.{stamp}.old"));
+    std::fs::rename(dst, &aside).map_err(|e| format!("replacing {}: {e}", dst.display()))?;
+    std::fs::copy(src, dst)
+        .map(drop)
+        .map_err(|e| format!("copying to {}: {e}", dst.display()))
+}
+
+fn ps_quote(p: &Path) -> String {
+    format!("'{}'", p.display().to_string().replace('\'', "''"))
+}
+
+/// Run a PowerShell snippet without flashing a console window; on failure
+/// return PowerShell's own error text.
+fn powershell(script: &str) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    let out = std::process::Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output()
+        .map_err(|e| format!("starting PowerShell: {e}"))?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        let err = String::from_utf8_lossy(&out.stderr);
+        let first = err
+            .lines()
+            .map(str::trim)
+            .find(|l| !l.is_empty())
+            .unwrap_or("PowerShell reported an error");
+        Err(first.to_string())
+    }
 }
 
 /// Remove the registry entries and the installed copy. A running .exe cannot
@@ -171,6 +360,11 @@ pub fn uninstall() -> Result<(), String> {
         delete_tree(&format!(r"Software\Classes\{key}"));
     }
     delete_tree(UNINSTALL_KEY);
+    // Ignore failures: the package is not there if the top-level menu was
+    // never added.
+    let _ = powershell(&format!(
+        "Get-AppxPackage -Name '{PACKAGE_NAME}' | Remove-AppxPackage"
+    ));
     notify_shell();
 
     let dir = install_dir();
