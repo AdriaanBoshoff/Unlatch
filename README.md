@@ -11,6 +11,12 @@ to the Recycle Bin once it is free.
 Written in Rust. A single self-contained `.exe`, no runtime to install, no admin rights needed to
 install.
 
+<p align="center"><img src="docs/locked-folder.png" width="640" alt="Unlatch listing three programs that are using a folder, each with an End process button"></p>
+
+| Nothing holding it | Started on its own |
+|---|---|
+| ![Unlatch reporting that nothing is using a file](docs/free.png) | ![Unlatch's start screen with Choose file and Choose folder buttons](docs/start.png) |
+
 ## Features
 
 - **Right-click integration** for files, folders, folder backgrounds and drives, including the
